@@ -71,6 +71,49 @@ static void wifi_connect_(void)
   Serial.println(F("\nWiFi connected."));
 }
 
+
+/**
+ * @brief Parse an ASCII integer from a NUL-terminated buffer (single return).
+ * @details
+ *  - Accepts base-10 integers; allows trailing spaces only.
+ *  - Rejects any other trailing characters.
+ *  - On success writes the parsed value into *out.
+ *  - On failure, *out is left unmodified.
+ *
+ * @param[in]  s    NUL-terminated input buffer (must not be NULL).
+ * @param[out] out  Parsed value destination (must not be NULL).
+ * @return true on valid integer parse; false otherwise.
+ */
+static bool parse_ascii_int_(const char* s, long* out)
+{
+  bool status = false;  /* single exit flag */
+
+  if ((s != NULL) && (out != NULL)) {
+    char* endptr = NULL;
+    long val = strtol(s, &endptr, 10);
+
+    /* Allow only trailing spaces after the numeric part */
+    while ((endptr != NULL) && (*endptr == ' ')) {
+      ++endptr;
+    }
+
+    /* Accept only if:
+       - strtol parsed something (endptr not NULL),
+       - no conversion error (errno == 0),
+       - and we ended exactly at string end. */
+    if ((endptr != NULL) && (*endptr == '\0')) {
+      *out = val;   /* write output only on success */
+      status = true;
+    } else {
+      /* not ok; *out remains unchanged */
+    }
+  } else {
+    /* invalid pointers; ok remains false */
+  }
+
+  return status;
+}
+
 static void mqtt_connect_and_sub_(void)
 {
   Serial.print(F("Connecting MQTT: "));
@@ -109,10 +152,16 @@ static void onMqttMessage_(int messageSize)
   }
 
   /* Copy payload into a fixed-size buffer and NUL-terminate */
-  char buf[16];
+  static const int buffSize = 16;
+  char buf[buffSize];
   int i = 0;
-  const int maxCopy = (messageSize < (static_cast<int>(sizeof(buf)) - 1))
-                        ? messageSize : (static_cast<int>(sizeof(buf)) - 1);
+  int maxCopy = 0;
+  
+  if (messageSize < (buffSize - 1)) {
+    maxCopy = messageSize;
+  } else {
+    maxCopy = buffSize - 1;
+  }
 
   while ((g_mqtt.available() > 0) && (i < maxCopy)) {
     buf[i++] = static_cast<char>(g_mqtt.read());
@@ -122,12 +171,10 @@ static void onMqttMessage_(int messageSize)
   /* Discard any extra bytes beyond our buffer */
   while (g_mqtt.available() > 0) { (void)g_mqtt.read(); }
 
-  /* Robust ASCII parse: allow trailing spaces only */
-  char* endptr = NULL;
-  long value = strtol(buf, &endptr, 10);
-  while ((endptr != NULL) && (*endptr == ' ')) { ++endptr; }
-  if ((endptr == NULL) || (*endptr != '\0')) {
-    /* Non-numeric or contaminated input: ignore silently */
+  long value = 0U;
+  
+  if(parse_ascii_int_(buf, &value) != true)
+  {
     return;
   }
 
